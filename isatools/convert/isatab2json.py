@@ -708,7 +708,7 @@ class ISATab2ISAjson_v1:
 
                  header_type = None
 
-                 if column_name.strip()==self.CHARACTERISTICS and (header==self.CHARACTERISTICS or header == self.LABEL or header==self.MATERIAL_TYPE):
+                 if (column_name.strip()==self.CHARACTERISTICS and (header.startswith(self.CHARACTERISTICS) or header == self.LABEL or header==self.MATERIAL_TYPE)):
                      if header not in node.attributes:
                          continue
                      if header == self.MATERIAL_TYPE:
@@ -720,7 +720,7 @@ class ISATab2ISAjson_v1:
                      #if header not in node.attributes:
                      #    continue
                      header_type = "factor"
-                 elif column_name.strip()==self.PARAMETER_VALUE and (header == self.PARAMETER_VALUE or header == self.ARRAY_DESIGN_REF):
+                 elif (column_name.strip()==self.PARAMETER_VALUE and (header.startswith(self.PARAMETER_VALUE) or header == self.ARRAY_DESIGN_REF)):
                      if header not in node.parameters:
                          continue
                      if header == self.ARRAY_DESIGN_REF:
