@@ -4,31 +4,49 @@
     "description": "JSON-schema representing a protocol application in the ISA model",
     "type": "object",
     "properties": {
+        "@id": { "type": "string", "format": "uri" },
         "name": {
             "type": "string"
         },
         "executesProtocol": {
                 "$ref": "protocol_schema.json#"
         },
-        "parameters": {
+        "parameterValues": {
             "type": "array",
             "items": {
-                  "$ref" : "parameter_schema.json#"
+                  "$ref" : "process_parameter_value_schema.json#"
             }
+        },
+        "performer": {
+             "type": "string"
+        },
+        "date": {
+             "type": "string",
+              "format": "date-time"
+        },
+        "previousProcess" : {
+             "$ref" : "process_schema.json#"
+        },
+        "nextProcess": {
+             "$ref" : "process_schema.json#"
         },
         "inputs" : {
             "type": "array",
             "items": {
                  "anyOf": [
-                        {
-                            "type": "object",
-                            "$ref": "material_schema.json#"
-                        },
-                        {
-                            "type": "object",
-                            "$ref": "data_schema.json#"
-                        }
-                    ]
+                   {
+                     "$ref": "source_schema.json#"
+                   },
+                   {
+                     "$ref": "sample_schema.json#"
+                   },
+                   {
+                     "$ref": "data_schema.json#"
+                   },
+                   {
+                     "$ref": "material_schema.json#"
+                   }
+                 ]
             }
         },
         "outputs" : {
@@ -36,14 +54,21 @@
             "items": {
                  "anyOf": [
                         {
-                            "type": "object",
-                            "$ref": "material_schema.json#"
+                            "$ref": "sample_schema.json#"
                         },
                         {
-                            "type": "object",
                             "$ref": "data_schema.json#"
+                        },
+                        {
+                        "$ref": "material_schema.json#"
                         }
                     ]
+            }
+        },
+        "comments" : {
+            "type": "array",
+            "items": {
+                 "$ref": "comment_schema.json#"
             }
         }
     },

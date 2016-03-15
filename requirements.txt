@@ -1,4 +1,10 @@
+biopy-isatab
 jsonschema
-warlock
-bs4
-urllib2
+pandas
+networkx
+behave
+httpretty
+sure
+lxml
+requests
+coveralls

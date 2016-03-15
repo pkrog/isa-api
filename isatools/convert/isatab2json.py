@@ -1,340 +1,763 @@
-__author__ = 'Alfie Abdul-Rahman'
+__author__ = 'agbeltran'
 
 import json
-import glob
 import os
-import ntpath
-import csv
+from os.path import join
+from isatools.io.isatab_parser import parse
+from jsonschema import RefResolver, Draft4Validator
+from uuid import uuid4
+from enum import Enum
+import re
 
-from isatools.io import isatab_parser
-from isatools.convert.common_functions import CommonFunctions
+SCHEMAS_PATH = join(os.path.dirname(os.path.realpath(__file__)), "../schemas/isa_model_version_1_0_schemas/core/")
+INVESTIGATION_SCHEMA = "investigation_schema.json"
 
-class IsatabToJsonWriter():
-    commonFunctions = CommonFunctions()
 
-    def __init__(self):
-        self._col_isaMaterialType = ("Material Type", "Term Source REF", "Term Accession Number")
-        self._col_isaMaterialAttribute = ("Characteristics", "Term Source REF", "Term Accession Number", "Unit")
-        self._col_isaMaterialLabel = ("Label", "Term Source REF", "Term Accession Number")
-        self._col_isaMaterialNode = ("Source Name", "Sample Name", "Extract Name", "Labeled Extract Name")
-        self._col_isaProcessNode = ("Assay Name", "Normalization Name", "Data Transformation Name", "Array Design REF", "Scan Name")
-        self._col_isaProtocolExecutionNode = ("Protocol REF")
-        self._col_isaFactorValue = ("Factor Value")
-        self._col_isaParameterValue = ("Parameter Value")
-        self._col_isaDataNode = ("File")
+class IdentifierType(Enum):
+    counter = 1
+    uuid = 2
+    name = 3
 
-    def parsingIsatab(self, work_dir, json_dir):
-        rec = isatab_parser.parse(work_dir)
-        # process the investigation files
-        fnames = glob.glob(os.path.join(work_dir, "i_*.txt")) + \
-                 glob.glob(os.path.join(work_dir, "*.idf.txt"))
-        investigationFilename = ntpath.basename(str(fnames[0])).split(".")
-        self.parseInvestigationToJson(rec, os.path.join(json_dir, investigationFilename[0] + ".json"), os.path.join(json_dir, os.path.basename(work_dir) + ".json"), work_dir, json_dir)
 
-    def parseInvestigationToJson(self, rec, i_File, single_file, work_dir, json_dir):
-        json_structures = {}
-        self.createListOfAttributes(json_structures, rec.ontology_refs, "ontologySourceReference")
-        self.createInvestigationNode(json_structures, rec)
-        single_json_structures = json_structures.copy()
-        #  multiple json structure
-        self.studies(json_structures, rec.studies, work_dir, json_dir, False)
-        with open(i_File, "w") as outfile:
-            json.dump(json_structures, outfile, indent=4, sort_keys=True)
-        outfile.close()
-        # single json structure
-        self.studies(single_json_structures, rec.studies, work_dir, json_dir, True)
-        with open(single_file, "w") as outfile:
-            json.dump(single_json_structures, outfile, indent=4, sort_keys=True)
-        outfile.close()
+def convert(work_dir, json_dir, identifier_type=IdentifierType.name):
+    converter = ISATab2ISAjson_v1(identifier_type)
+    converter.convert(work_dir, json_dir)
 
-    def createInvestigationNode(self, json_structures, rec):
-        json_inner_struct = {}
-        for meta in rec.metadata:
-            json_inner_struct[self.commonFunctions.makeAttributeName(meta)] = rec.metadata[meta]
-        json_inner_struct["investigationPublications"] = self.createListOfAttributesArray(rec.publications)
-        json_inner_struct["investigationContacts"] = self.createListOfAttributesArray(rec.contacts)
-        json_structures["investigation"] = json_inner_struct
-        return json_structures
 
-    def createAttributes(self, json_structures, metadata, tagName):
-        json_inner_struct = {}
-        for meta in metadata:
-            json_inner_struct[self.commonFunctions.makeAttributeName(meta)] = metadata[meta]
-        json_structures[tagName] = json_inner_struct
-        return json_structures
+class ISATab2ISAjson_v1:
 
-    def createListOfAttributesArray(self, properties):
-        json_list_struct = []
-        for onto in properties:
-            json_item_struct = {}
-            for item in onto:
-                json_item_struct[self.commonFunctions.makeAttributeName(item)] = onto[item]
-            json_list_struct.append(json_item_struct)
-        return json_list_struct
+    MATERIAL_TYPE = "Material Type"
+    LABEL = "Label"
+    CHARACTERISTICS = "Characteristics"
+    CHARACTERISTIC_CATEGORY = "characteristic_category"
+    FACTOR_VALUE = "Factor Value"
+    UNIT = "Unit"
+    PARAMETER_VALUE = "Parameter Value"
+    ARRAY_DESIGN_REF = "Array Design REF"
 
-    def createListOfAttributes(self, json_structures, properties, tagName):
-        json_list_struct = []
-        for onto in properties:
-            json_item_struct = {}
-            for item in onto:
-                json_item_struct[self.commonFunctions.makeAttributeName(item)] = onto[item]
-            json_list_struct.append(json_item_struct)
-        json_structures[tagName] = json_list_struct
-        return json_structures
+    def __init__(self, identifier_type):
+        self.identifiers = list() #list of dictionaries
+        self.counters = dict()
+        self.identifier_type = identifier_type
 
-    def createStudyNode(self, json_structures, rec, work_dir, json_dir, isSingleStructure):
-        json_inner_struct = {}
-        for meta in rec.metadata:
-            json_inner_struct[self.commonFunctions.makeAttributeName(meta)] = rec.metadata[meta]
-        json_inner_struct["studyDesignDescriptors"] = self.createListOfAttributesArray(rec.design_descriptors)
-        json_inner_struct["studyPublications"] = self.createListOfAttributesArray(rec.publications)
-        json_inner_struct["studyFactors"] = self.createListOfAttributesArray(rec.factors)
-        # this is a very silly way of doing extracting the study protocol but needed because of the error in encoding
-        # need to think of a better way
-        json_study_protocol = []
-        for sp in rec.protocols:
-            json_sp = {}
-            for i_sp in sp:
-                json_sp[self.commonFunctions.makeAttributeName(i_sp)] = sp[i_sp].decode('ascii', errors='ignore')
-            json_study_protocol.append(json_sp)
-        json_inner_struct["studyProtocols"] = json_study_protocol
-        json_inner_struct["studyContacts"] = self.createListOfAttributesArray(rec.contacts)
-        filename = (rec.metadata["Study File Name"]).split(".")[0]
-        studySamples = self.readIsatabStudyAssayExtend(os.path.join(work_dir, filename + ".txt"))
-        if (isSingleStructure):
-            json_inner_struct["studySamples"] = studySamples
+    def setIdentifier(self, type, name, identifier):
+        self.identifiers.append(dict([("type", type), ("name", name), ("identifier", identifier)]))
+
+    def getIdentifier(self, type, name):
+        for subVal in self.identifiers:
+            if subVal["type"]==type and subVal["name"]==name:
+                return subVal["identifier"]
+
+    def generateIdentifier(self, type, name):
+        try:
+            self.counters[type] += 1
+        except KeyError:
+            self.counters[type] = 1
+
+        if self.identifier_type==IdentifierType.counter:
+            identifier = "http://data.isa-tools.org/"+type+"/"+str(self.counters[type])
+        elif self.identifier_type == IdentifierType.uuid:
+            identifier = "http://data.isa-tools.org/UUID/"+str(uuid4())
+        elif self.identifier_type == IdentifierType.name:
+            identifier = "#"+type+"/"+name.replace (" ", "_")
+
+        self.setIdentifier(type, name, identifier)
+        return identifier
+
+    #def generateIdentifier(self):
+    #    return "http://data.isa-tools.org/UUID/"+str(uuid4())
+
+    def convert(self, work_dir, json_dir):
+        """Convert an ISA-Tab dataset (version 1) to JSON provided the ISA model v1.0 JSON Schemas
+            :param work_dir: directory containing the ISA-tab dataset
+            :param json_dir: output directory where the resulting json file will be saved
+        """
+        print("Converting ISAtab to ISAjson for ", work_dir)
+
+
+        isa_tab = parse(work_dir)
+        #print(isa_tab)
+
+        if isa_tab is None:
+            print("No ISAtab dataset found")
         else:
-            header, nodes = self.readIsatabStudyAssay(os.path.join(work_dir, filename + ".txt"))
-            self.makeStudyAssayJson(header, nodes, os.path.join(json_dir, filename + ".json"), "studySampleTable", "studyTableHeaders", "studyTableData")
-            outputJson = {}
-            outputJson["studySamples"] = studySamples
-            with open(os.path.join(json_dir, filename + "_expanded.json"), "w") as outfile:
-                json.dump(outputJson, outfile, indent=4, sort_keys=True)
-            outfile.close()
-        myassay = []
-        for assay in rec.assays:
-            json_assay_structure = {}
-            for i_assay in assay.metadata:
-                json_assay_structure[self.commonFunctions.makeAttributeName(i_assay)] = assay.metadata[i_assay]
-                filename = (assay.metadata["Study Assay File Name"]).split(".")[0]
-                assaysTable = self.readIsatabStudyAssayExtend(os.path.join(work_dir, filename + ".txt"))
-                if (isSingleStructure):
-                    json_assay_structure["assaysTable"] = assaysTable
+                if isa_tab.metadata != {}:
+                    #print("isa_tab.metadata->",isa_tab.metadata)
+                    isa_json = dict([
+                        ("identifier",isa_tab.metadata['Investigation Identifier']),
+                        ("title", isa_tab.metadata['Investigation Title']),
+                        ("description",isa_tab.metadata['Investigation Description']),
+                        ("submissionDate", isa_tab.metadata['Investigation Submission Date']),
+                        ("publicReleaseDate", isa_tab.metadata['Investigation Public Release Date']),
+                        ("ontologySourceReferences", self.createOntologySourceReferences(isa_tab.ontology_refs)),
+                        ("publications", self.createPublications(isa_tab.publications, "Investigation")),
+                        ("people", self.createContacts(isa_tab.contacts, "Investigation")),
+                        ("studies", self.createStudies(isa_tab.studies)),
+                        ("comments", self.createComments(isa_tab.metadata))
+                    ])
+
+                if (isa_tab.metadata['Investigation Identifier']):
+                    file_name = os.path.join(json_dir,isa_tab.metadata['Investigation Identifier']+".json")
                 else:
-                    header, nodes = self.readIsatabStudyAssay(os.path.join(work_dir, filename + ".txt"))
-                    self.makeStudyAssayJson(header, nodes, os.path.join(json_dir, filename + ".json"), "assaysTable", "assayTableHeaders", "assayTableData")
-                    outputJson = {}
-                    outputJson["assaysTable"] = assaysTable
-                    with open(os.path.join(json_dir, filename + "_expanded.json"), "w") as outfile:
-                        json.dump(outputJson, outfile, indent=4, sort_keys=True)
+                    file_name = os.path.join(json_dir,isa_tab.studies[0].metadata['Study Identifier']+".json")
+
+                #validate json
+                schema = json.load(open(join(SCHEMAS_PATH, INVESTIGATION_SCHEMA)))
+                resolver = RefResolver('file://'+join(SCHEMAS_PATH, INVESTIGATION_SCHEMA), schema)
+                validator = Draft4Validator(schema, resolver=resolver)
+                validator.validate(isa_json, schema)
+
+                #TODO refactor saving the file into a separate method
+                with open(file_name, "w") as outfile:
+                    json.dump(isa_json, outfile, indent=4, sort_keys=True)
                     outfile.close()
-            myassay.append(json_assay_structure)
-        json_inner_struct["assays"] = myassay
-        json_structures["study"] = json_inner_struct
+                print("... conversion finished.")
+                return isa_json
 
-    def studies(self, json_structures, studies, work_dir, json_dir, isSingleStructure):
-        mystudies = []
-        for _study in studies:
-            json_study_structure = {}
-            self.createStudyNode(json_study_structure, _study, work_dir, json_dir, isSingleStructure)
-            mystudies.append(json_study_structure)
-            json_structures["studies"] = mystudies
+    def createComments(self, isadict):
+        comments = []
+        comments_regex = re.compile('Comment\[(.*?)\]')
+        for k in [k for k in isadict.keys() if comments_regex.match(k)]:
+            comments.append(self.createComment(comments_regex.findall(k)[0], isadict[k]))
+        return comments
 
-    def parseStudyAssayToJson(self, rec, work_dir, json_dir):
-        for study in rec.studies:
-            filename = (study.metadata["Study File Name"]).split(".")[0]
-            header, nodes = self.readIsatabStudyAssay(os.path.join(work_dir, filename + ".txt"))
-            self.makeStudyAssayJson(header, nodes, os.path.join(json_dir, filename + ".json"), "studySampleTable", "studyTableHeaders", "studyTableData")
-            for assay in study.assays:
-                filename = (assay["Study Assay File Name"]).split(".")[0]
-                header, nodes = self.readIsatabStudyAssay(os.path.join(work_dir, filename + ".txt"))
-                self.makeStudyAssayJson(header, nodes, os.path.join(json_dir, filename + ".json"), "assaysTable", "assayTableHeaders", "assayTableData")
+    def createComment(self, name, value):
+        comment_json = dict([
+            ("name", name),
+            ("value", value)
+        ])
+        return comment_json
 
-    def readIsatabStudyAssayExtend(self, studyfilepath):
-        if os.path.isfile(studyfilepath):
-            studySamples = []
-            with open(studyfilepath, "rU") as in_handle:
-                reader = csv.reader(in_handle, dialect="excel-tab")
-                header = reader.next()
-                hGroupings = self.createHeaderGrouping(header)
-                for line in reader:
-                    studySample = []
-                    characteristicsArray = []
-                    factorsArray = []
-                    parametersArray = []
-                    labelsArray = []
-                    for i in hGroupings:
-                        obj = {}
-                        for p in i:
-                            attrDict = {}
-                            if not (isinstance(p, list)):
-                                obj["type"] = self.typeValue(header[p])
-                                obj["value"] = line[p]
-                                if "Comment" in header[p]:
-                                    obj["name"] = header[p].split("[")[0]
-                                    obj["commentTerm"] = header[p][header[p].index("[") + 1:header[p].rindex("]")]
-                                else:
-                                    obj["name"] = header[p]
-                            else:
-                                for b, t in enumerate(p):
-                                    str = header[t]
-                                    if "Characteristics" in header[t]:
-                                        attrDict["characteristics"] = line[t]
-                                        attrDict["categoryTerm"] = str[str.index("[") + 1:str.rindex("]")]
-                                    else:
-                                        if "Factor" in header[t]:
-                                            attrDict["factorValue"] = line[t]
-                                            attrDict["factorName"] = str[str.index("[") + 1:str.rindex("]")]
-                                        else:
-                                            if "Parameter" in header[t]:
-                                                attrDict["parameterValue"] = line[t]
-                                                attrDict["parameterTerm"] = str[str.index("[") + 1:str.rindex("]")]
-                                            else:
-                                                if "Material" in header[t]:
-                                                    attrDict["characteristics"] = line[t]
-                                                    attrDict["categoryTerm"] = "Material Type"
-                                                else:
-                                                    attrDict[self.commonFunctions.makeAttributeName(header[t])] = line[t]
-                                    obj["type"] = self.typeValue(header[p[0]])
-                                if "Characteristics" in header[p[0]] or "Material" in header[p[0]]:
-                                    characteristicsArray.append(attrDict)
-                                if "Factor" in header[p[0]]:
-                                    factorsArray.append(attrDict)
-                                if "Parameter" in header[p[0]]:
-                                    parametersArray.append(attrDict)
-                                if "Label" in header[p[0]]:
-                                    labelsArray.append(attrDict)
-                        if (isinstance(p, list)):
-                            if len(characteristicsArray) > 0:
-                                obj["items"] = characteristicsArray
-                                characteristicsArray = []
-                            if len(factorsArray) > 0:
-                                obj["items"] = factorsArray
-                                factorsArray = []
-                            if len(parametersArray) > 0:
-                                obj["items"] = parametersArray
-                                parametersArray = []
-                            if len(labelsArray) > 0:
-                                obj["items"] = labelsArray
-                                labelsArray = []
-                        studySample.append(obj)
-                    studySamples.append(studySample)
-            return studySamples
+    def createContacts(self, contacts, inv_or_study):
+        people_json = []
+        for contact in contacts:
+            person_last_name = contact[inv_or_study+" Person Last Name"]
+            if not person_last_name:
+                continue
+            person_identifier = self.generateIdentifier("person", person_last_name)
+            person_json = dict([
+                ("@id", person_identifier),
+                ("lastName", person_last_name),
+                ("firstName", contact[inv_or_study+" Person First Name"]),
+                ("midInitials", contact[inv_or_study+" Person Mid Initials"]),
+                ("email", contact[inv_or_study+" Person Email"]),
+                ("phone", contact[inv_or_study+" Person Phone"]),
+                ("fax", contact[inv_or_study+" Person Fax"]),
+                ("address", contact[inv_or_study+" Person Address"]),
+                ("affiliation", contact[inv_or_study+" Person Affiliation"]),
+                ("roles", self.createOntologyAnnotationsFromStringList(contact, inv_or_study, " Person Roles")),
+                ("comments", self.createComments(contact))
+            ])
 
-    def createHeaderGrouping(self, header):
-        out = []
-        attributes = []
-        miniAttr = []
-        for i, h in enumerate(header):
-            if (self.checkIfMaterialNode(h)) or (h in self._col_isaProtocolExecutionNode) or (self.checkIfProcessNode(h)) or ("file" in h.lower()) or ("comment" in h.lower()):
-                if (i > 0):
-                    if len(attributes) > 0:
-                        out.append(attributes)
-                    attributes = []
-                out.append([i])
+            people_json.append(person_json)
+        return people_json
+
+
+    def createPublications(self, publications, inv_or_study):
+        publications_json = []
+        for pub in publications:
+            publication_json = dict([
+                ("pubMedID", pub[inv_or_study+' PubMed ID']),
+                ("doi", pub[inv_or_study+' Publication DOI']),
+                ("authorList", pub[inv_or_study+' Publication Author List']),
+                ("title", pub[inv_or_study+' Publication Title']),
+                ("status", self.createOntologyAnnotationForInvOrStudy(pub, inv_or_study, " Publication Status"))
+            ]
+            )
+            publications_json.append(publication_json)
+        return publications_json
+
+
+    def createProtocols(self, protocols, assays):
+        protocols_json = []
+
+        protocols_to_attach_parameter = []
+        #keep protocols that should have ArrayDesignREF as a parameter
+        for assay in assays:
+            for process_node in assay.process_nodes.values():
+                if self.ARRAY_DESIGN_REF in process_node.parameters:
+                        protocols_to_attach_parameter.append(process_node.protocol)
+
+        for protocol in protocols:
+            protocol_name = protocol['Study Protocol Name']
+            if not protocol_name:
+                continue
+            protocol_identifier = self.generateIdentifier("protocol", protocol_name)
+            parameters = self.createProtocolParameterList(protocol)
+
+            if protocol_name in protocols_to_attach_parameter:
+                #add parameter for ArrayDesignREF if it is used in any assay
+                parameter_identifier = self.generateIdentifier("parameter", self.ARRAY_DESIGN_REF)
+                json_item = dict([
+                    ("@id", parameter_identifier),
+                    ("parameterName",  self.createOntologyAnnotation(self.ARRAY_DESIGN_REF, "", ""))
+                ])
+
+            protocol_json = dict([
+                ("@id", protocol_identifier),
+                ("name", protocol_name),
+                ("protocolType", self.createOntologyAnnotationForInvOrStudy(protocol, "Study", " Protocol Type")),
+                ("description", protocol['Study Protocol Description']),
+                ("uri", protocol['Study Protocol URI']),
+                ("version", protocol['Study Protocol Version']),
+                ("parameters", parameters),
+                ("components", self.createProtocolComponentList(protocol))
+                ])
+            protocols_json.append(protocol_json)
+
+
+        return protocols_json
+
+
+
+    def createProtocolParameterList(self, protocol):
+        json_list = []
+        parameters_json = self.createOntologyAnnotationsFromStringList(protocol, "Study", " Protocol Parameters Name")
+        i = 0
+        for parameter_json in parameters_json:
+            parameter_identifier = self.generateIdentifier("parameter", parameters_json[i]["annotationValue"])
+            json_item = dict([
+                ("@id", parameter_identifier),
+                ("parameterName",  parameter_json)
+            ])
+            json_list.append(json_item)
+            i += 1
+        return json_list
+
+
+    def createOntologyAnnotationForInvOrStudy(self, object, inv_or_study, type):
+        onto_ann = dict([
+                ("annotationValue", object[inv_or_study+type]),
+                ("termSource", object[inv_or_study+type+" Term Source REF"]),
+                ("termAccession", object[inv_or_study+type+" Term Accession Number"])
+        ])
+        return onto_ann
+
+
+    def createOntologyAnnotation(self, name, termSource, termAccesssion):
+        onto_ann = dict([
+            ("annotationValue", name),
+            ("termSource", termSource),
+            ("termAccession", termAccesssion)
+        ])
+        return onto_ann
+
+
+    def createOntologyAnnotationsFromStringList(self, object, inv_or_study, type):
+        name_array = object[inv_or_study+type].split(";")
+        term_source_array = object[inv_or_study+type+" Term Source REF"].split(";")
+        term_accession_array = object[inv_or_study+type+" Term Accession Number"].split(";")
+        onto_annotations = []
+        for i in range(0,len(name_array)):
+             if (not name_array[i]):
+                 continue
+             onto_ann = self.createOntologyAnnotation(name_array[i],
+                                                      term_source_array[i],
+                                                      term_accession_array[i] )
+             onto_annotations.append(onto_ann)
+        return onto_annotations
+
+
+    def createOntologyAnnotationListForInvOrStudy(self, array, inv_or_study, type):
+        onto_annotations = []
+        for object in array:
+            onto_ann = self.createOntologyAnnotation(object[inv_or_study+type],
+                                                     object[inv_or_study+type+" Term Source REF"],
+                                                     object[inv_or_study+type+" Term Accession Number"])
+            onto_annotations.append(onto_ann)
+        return onto_annotations
+
+
+    def createOntologySourceReferences(self, ontology_refs):
+        ontologies = []
+        for ontology_ref in ontology_refs:
+            ontology = dict([
+                ("description", ontology_ref["Term Source Description"]),
+                ("file",ontology_ref["Term Source File"]),
+                ("name", ontology_ref["Term Source Name"]),
+                ("version", ontology_ref["Term Source Version"])
+            ])
+            ontologies.append(ontology)
+        return ontologies
+
+
+    def createStudies(self, studies):
+        study_array = []
+        for study in studies:
+            study_name = study.metadata['Study Identifier']
+            study_identifier = self.generateIdentifier("study", study_name)
+            characteristics_categories_list = self.createCharacteristicsCategories(study.nodes)
+            unit_categories_list = self.createUnitsCategories(study.nodes)
+            factors_list = self.createStudyFactorsList(study.factors)
+            source_dict = self.createSourcesDictionary(study.nodes)
+            sample_dict = self.createSampleDictionary(study.nodes)
+            material_dict = self.createMaterialDictionary(study.nodes)
+            protocol_list = self.createProtocols(study.protocols, study.assays)
+            assay_list = self.createStudyAssaysList(study.assays, sample_dict)
+            #This data_dict should be empty on the studies - it is only used in the assays
+            data_dict = self.createDataFiles(study.nodes)
+            studyJson = dict([
+                ("@id", study_identifier),
+                ("identifier",study_name),
+                ("title", study.metadata['Study Title']),
+                ("description", study.metadata['Study Description']),
+                ("submissionDate", study.metadata['Study Submission Date']),
+                ("publicReleaseDate", study.metadata['Study Public Release Date']),
+                ("studyDesignDescriptors",self.createOntologyAnnotationListForInvOrStudy(study.design_descriptors, "Study", " Design Type")),
+                ("publications", self.createPublications(study.publications, "Study")),
+                ("people", self.createContacts(study.contacts, "Study")),
+                ("protocols", protocol_list),
+                ("factors", factors_list),
+                ("characteristicCategories", characteristics_categories_list),
+                ("unitCategories", unit_categories_list),
+                ("materials", dict([
+                        ("sources", list(source_dict.values())),
+                        ("samples",list(sample_dict.values())),
+                        ("otherMaterials",list(material_dict.values()))
+                ])),
+                ("processSequence", self.createProcessSequence(study.process_nodes, source_dict, sample_dict, material_dict, data_dict)),
+                ("assays", assay_list),
+                ("filename", study.metadata['Study File Name']),
+                ("comments", self.createComments(study.metadata)),
+            ])
+            study_array.append(studyJson)
+        return study_array
+
+
+    def createProtocolComponentList(self, protocol):
+        json_list = []
+        components_name = protocol['Study Protocol Components Name'].split(";")
+        components_type_json = self.createOntologyAnnotationsFromStringList(protocol, "Study", " Protocol Components Type")
+        index = 0
+        for component_type_json in components_type_json:
+            component_name = components_name[index]
+            json_item = dict([
+                ("componentName", component_name),
+                ("componentType",  component_type_json)
+            ])
+            json_list.append(json_item)
+            index += 1
+        return json_list
+
+
+    def createStudyFactorsList(self, factors):
+        json_list = []
+        for factor in factors:
+             factor_identifier = self.generateIdentifier("factor", factor['Study Factor Name'])
+             json_item = dict([
+                ("@id", factor_identifier),
+                ("factorName", factor['Study Factor Name']),
+                ("factorType", self.createOntologyAnnotation(factor['Study Factor Type'], factor['Study Factor Type Term Source REF'],factor['Study Factor Type Term Accession Number']))
+            ])
+             json_list.append(json_item)
+        return json_list
+
+
+    def createProcessSequence(self, process_nodes, source_dict, sample_dict, material_dict, data_dict):
+        json_list = []
+        #generate all the identifiers
+        for process_node_name in process_nodes:
+            self.generateIdentifier("process", process_node_name)
+
+        for process_node_name in process_nodes:
+            try:
+                measurement_type = process_nodes[process_node_name].study_assay.metadata["Study Assay Measurement Type"]
+            except:
+                measurement_type = ""
+
+            try:
+                platform = process_nodes[process_node_name].study_assay.metadata["Study Assay Technology Platform"]
+            except:
+                platform = ""
+
+            try:
+                technology = process_nodes[process_node_name].study_assay.metadata["Study Assay Technology Type"]
+            except:
+                technology = ""
+            process_node = process_nodes[process_node_name]
+
+            process_identifier = self.getIdentifier("process", process_node_name)
+            protocol_executed =  self.createExecuteStudyProtocol(process_node_name, process_node)
+            previous_process_identifier = self.getIdentifier("process", process_node.previous_process.name) if process_node.previous_process else ""
+            next_process_identifier = self.getIdentifier("process", process_node.next_process.name) if process_node.next_process else ""
+            if (process_node.assay_name):
+                json_item = dict([
+                    ("@id", process_identifier),
+                    ("name", process_node.assay_name),
+                    ("executesProtocol", protocol_executed),
+                    ("performer", process_node.performer),
+                    ("date", process_node.date),
+                    ("parameterValues", self.createValueList(self.PARAMETER_VALUE, process_node_name, process_node)),
+                    ("inputs", self.createInputList(process_node.inputs, source_dict, sample_dict, material_dict, data_dict)),
+                    ("outputs", self.createOutputList(process_node.outputs, sample_dict, material_dict, data_dict)),
+                    ("comments", self.createFromNodeComments(process_node)),
+                ])
             else:
-                if ("Characteristics" in h) or ("Factor" in h) or ("Parameter" in h) or ("Label" in h):
-                    miniAttr = []
-                miniAttr.append(i)
-                if ("Term Accession Number" in h):
-                    attributes.append(miniAttr)
-        if len(attributes) > 0:
-            out.append(attributes)
-        return out
+                json_item = dict([
+                    ("@id", process_identifier),
+                    ("executesProtocol", protocol_executed),
+                    ("performer", process_node.performer),
+                    ("date", process_node.date),
+                    ("parameterValues", self.createValueList(self.PARAMETER_VALUE, process_node_name, process_node)),
+                    ("inputs", self.createInputList(process_node.inputs, source_dict, sample_dict, material_dict, data_dict)),
+                    ("outputs", self.createOutputList(process_node.outputs, sample_dict, material_dict, data_dict)),
+                    ("comments", self.createFromNodeComments(process_node)),
+            ])
 
-    def typeValue(self, type):
-        if (self.checkIfMaterialType(type)):
-            return "isaMaterialType"
-        if (self.checkIfMaterialAttribute(type)):
-            return "isaMaterialAttribute"
-        if (self.checkIfMaterialLabel(type)):
-            return "isaMaterialLabel"
-        if (self.checkIfMaterialNode(type)):
-            return "isaMaterialNode"
-        if (self.checkIfProcessNode(type)):
-            return "isaProcessNode"
-        if self._col_isaProtocolExecutionNode in type:
-            return "isaProtocolExecutionNode"
-        if self._col_isaFactorValue in type:
-            return "isaFactorValue"
-        if self._col_isaParameterValue in type:
-            return "isaParameterValue"
-        if self._col_isaDataNode in type:
-            return "isaDataNode"
-        if "Comment" in type:
-            return "isaComment"
-        return ""
+            if previous_process_identifier:
+                json_item.update({  "previousProcess" : dict([("@id", previous_process_identifier)]) })
+            if next_process_identifier:
+                json_item.update({ "nextProcess" :  dict([("@id", next_process_identifier)]) })
+            json_list.append(json_item)
+        return json_list
 
-    def readIsatabStudyAssay(self, studyfilepath):
-        if os.path.isfile(studyfilepath):
-            nodes = []
-            with open(studyfilepath, "rU") as in_handle:
-                reader = csv.reader(in_handle, dialect="excel-tab")
-                header = reader.next()
-                for line in reader:
-                    nodes.append(line)
-            return header, nodes
 
-    def checkIfMaterialNode(self, header):
-        for isaMN in self._col_isaMaterialNode:
-            if isaMN in header:
-                return True
-        return False
+    def createInputList(self, inputs, source_dict, sample_dict, material_dict, data_dict):
+        json_list = []
+        for argument in inputs:
+            try:
+                json_item = source_dict[argument]
+                source_id = dict([("@id", json_item["@id"])])
+                json_list.append(source_id)
+            except KeyError:
+                pass
+            try:
+                json_item = sample_dict[argument]
+                sample_id = dict([("@id", json_item["@id"])])
+                json_list.append(sample_id)
+            except KeyError:
+                pass
+            try:
+                json_item = material_dict[argument]
+                material_id = dict([("@id", json_item["@id"])])
+                json_list.append(material_id)
+            except KeyError:
+                pass
 
-    def checkIfProcessNode(self, header):
-        for isaPN in self._col_isaProcessNode:
-            if isaPN in header:
-                return True
-        return False
+            try:
+                json_item = data_dict[argument]
+                data_id = dict([("@id", json_item["@id"])])
+                json_list.append(data_id)
+            except KeyError:
+                pass
+        return json_list
 
-    def checkIfMaterialAttribute(self, header):
-        for isaMA in self._col_isaMaterialAttribute:
-            if isaMA in header:
-                return True
-        return False
 
-    def checkIfMaterialType(self, header):
-        for isaMT in self._col_isaMaterialType:
-            if isaMT in header:
-                return True
-        return False
+    def createOutputList(self, arguments, sample_dict, material_dict, data_dict):
+        json_list = []
+        for argument in arguments:
+            try:
+                json_item = sample_dict[argument]
+                sample_id = dict([("@id", json_item["@id"])])
+                json_list.append(sample_id)
+            except KeyError:
+                pass
 
-    def checkIfMaterialLabel(self, header):
-        for isaML in self._col_isaMaterialLabel:
-            if header in isaML:
-                return True
-        return False
+            try:
+                json_item = material_dict[argument]
+                material_id = dict([("@id", json_item["@id"])])
+                json_list.append(material_id)
+            except KeyError:
+                pass
 
-    def makeStudyAssayJson(self, header, nodes, filename, tableNameTitle, tableHeaderTitle, tableDataTitle):
-        json_structures = {}
-        tableHeaders = []
-        headerIndex = 0
-        attributes = []
-        heading = {}
-        for h in header:
-            if not (self.checkIfMaterialAttribute(h)):
-                if headerIndex > 0:
-                    tableHeaders.append(heading)
-                    attributes = []
-                heading = {}
-                heading.clear()
-                heading["name"] = h
-                heading["index"] = headerIndex
-            else:
-                attr = {}
-                attr["name"] = h
-                attr["index"] = headerIndex
-                attributes.append(attr)
-                heading["attributes"] = attributes
-            headerIndex = headerIndex + 1
+            try:
+                json_item = data_dict[argument]
+                data_id = dict([("@id", json_item["@id"])])
+                json_list.append(data_id)
+            except KeyError:
+                pass
+        return json_list
 
-        # to add the last item
-        tableHeaders.append(heading)
+    def createExecuteStudyProtocol(self, process_node_name, process_node):
+        json_item = dict([
+                   ("@id", self.getIdentifier("protocol", process_node.protocol))
+                ])
+        return json_item
 
-        json_structures[tableHeaderTitle] = tableHeaders
-        json_structures[tableDataTitle] = nodes
-        top = {}
-        top[tableNameTitle] = json_structures
-        with open(filename, "w") as outfile:
-            json.dump(top, outfile, indent=4, sort_keys=True)
-        outfile.close()
+
+    def createStudyAssaysList(self, assays, sample_dict):
+        json_list = []
+        for assay in assays:
+            characteristics_categories_list = self.createCharacteristicsCategories(assay.nodes)
+            unit_categories_list = self.createUnitsCategories(assay.nodes)
+            source_dict = self.createSourcesDictionary(assay.nodes)
+            sample_list = self.createSampleReferenceDict(assay.nodes, sample_dict)
+            material_dict = self.createMaterialDictionary(assay.nodes)
+            data_dict = self.createDataFiles(assay.nodes)
+            assay_name = assay.metadata['Study Assay File Name']
+            assay_identifier = self.generateIdentifier("assay", assay_name)
+            json_item = dict([
+                ("@id", assay_identifier),
+                ("filename", assay.metadata['Study Assay File Name']),
+                ("measurementType", self.createOntologyAnnotation(assay.metadata['Study Assay Measurement Type'],
+                                                                  assay.metadata['Study Assay Measurement Type Term Source REF'],
+                                                                  assay.metadata['Study Assay Measurement Type Term Accession Number'])),
+                ("technologyType", self.createOntologyAnnotation(assay.metadata['Study Assay Technology Type'],
+                                                                 assay.metadata['Study Assay Technology Type Term Source REF'],
+                                                                 assay.metadata['Study Assay Technology Type Term Accession Number'])),
+                ("technologyPlatform", assay.metadata['Study Assay Technology Platform']),
+                ("characteristicCategories", characteristics_categories_list),
+                ("unitCategories", unit_categories_list),
+                ("materials", dict([
+                    ("samples", sample_list),
+                    ("otherMaterials", list(material_dict.values()))
+                ])),
+                ("dataFiles", list(data_dict.values())),
+                ("processSequence", self.createProcessSequence(assay.process_nodes, source_dict, sample_dict, material_dict, data_dict))
+                ])
+            json_list.append(json_item)
+        return json_list
+
+    def createFromNodeComments(self, node):
+        comments = []
+        comments_regex = re.compile('Comment\[(.*?)\]')
+        for key in [key for key in node.metadata.keys() if comments_regex.match(key)]:
+            comments.append(self.createComment(comments_regex.findall(key)[0], getattr(
+                node.metadata[key][0], comments_regex.findall(key)[0].replace(' ', '_'))))
+        return comments
+
+    def createDataFiles(self, nodes):
+        json_dict = dict([])
+        for node_index in nodes:
+            if nodes[node_index].ntype.endswith(" File") :
+                data_identifier = self.generateIdentifier("data", node_index)
+                json_item = dict([
+                    ("@id", data_identifier),
+                    ("name", nodes[node_index].name),
+                    ("type", nodes[node_index].ntype),
+                    ("comments", self.createFromNodeComments(nodes[node_index]))
+                ])
+                json_dict.update({node_index: json_item})
+        return json_dict
+
+
+    def createSampleDictionary(self, nodes):
+        json_dict = dict([])
+        for node_index in nodes:
+            if nodes[node_index].ntype == "Sample Name":
+                sample_identifier = self.generateIdentifier("sample", node_index)
+
+                json_item = dict([
+                        ("@id", sample_identifier),
+                        ("name", node_index),
+                        ("factorValues", self.createValueList(self.FACTOR_VALUE, node_index, nodes[node_index])),
+                        ("characteristics", self.createValueList(self.CHARACTERISTICS,node_index, nodes[node_index]))
+                    ])
+
+                #derivesFrom sources
+                try:
+                     json_list = []
+                     for source_name in nodes[node_index].derivesFrom:
+                        source_index = "source-"+source_name
+                        source_identifier = self.getIdentifier("source", source_index)
+                        json_list.append(dict([ ("@id", source_identifier)]))
+
+                     json_item["derivesFrom"] = json_list
+                except KeyError:
+                     print("There is no source declared for sample ", node_index)
+
+                json_dict.update({node_index: json_item})
+
+        return json_dict
+
+
+    def createSampleReferenceDict(self, nodes, sample_dict):
+        json_dict = []
+        for node_index in nodes:
+             node = nodes[node_index]
+             if node.ntype == "Sample Name":
+                sample_identifier = self.getIdentifier("sample", node_index)
+                if sample_identifier:
+                    json_dict.append(dict([("@id", sample_identifier)]))
+                else:
+                    print("Warning: sample identifier has not been defined before", node_index)
+
+                #adding sample attributes that may have been defined at the assay level
+                try:
+                    sample_json = sample_dict[node_index]
+                    new_characteristics = self.createValueList(self.CHARACTERISTICS,node_index, node)
+                    sample_json["characteristics"] = sample_json["characteristics"] + new_characteristics
+                    sample_dict[node_index] = sample_json
+                except KeyError:
+                    print("Warning: the sample ", node_index, " has not been defined at the study level.")
+
+        return json_dict
+
+
+    def createSourcesDictionary(self, nodes):
+        json_dict = dict([])
+        for node_index in nodes:
+            if nodes[node_index].ntype == "Source Name":
+                source_identifier = self.generateIdentifier("source", node_index)
+                json_item = dict([
+                    ("@id", source_identifier),
+                    ("name", node_index),
+                    ("characteristics", self.createValueList(self.CHARACTERISTICS, node_index, nodes[node_index])),
+                ])
+                json_dict.update({node_index: json_item})
+        return json_dict
+
+    def createMaterialDictionary(self, nodes):
+        json_dict = dict([])
+        for node_index in nodes:
+            if nodes[node_index].ntype != "Source Name" and nodes[node_index].ntype != "Sample Name" and nodes[node_index].ntype.find("File")==-1:
+                material_identifier = self.generateIdentifier("material", node_index)
+                json_item = dict([
+                    ("@id", material_identifier),
+                    ("name", node_index),
+                    ("type", nodes[node_index].ntype),
+                    ("characteristics", self.createValueList(self.CHARACTERISTICS, node_index, nodes[node_index])),
+                ])
+                json_dict.update({node_index: json_item})
+        return json_dict
+
+
+    def createCharacteristicsCategories(self, nodes):
+        json_list = []
+        for node_index in nodes:
+            node = nodes[node_index]
+            for header in node.metadata:
+                 if (not header.startswith(self.CHARACTERISTICS)) and (not header==self.MATERIAL_TYPE) and (not header==self.LABEL):
+                    continue
+                 value_header = header.replace("]", "").split("[")[-1]
+                 if header == self.MATERIAL_TYPE:
+                     value_header = self.MATERIAL_TYPE
+                 if header == self.LABEL:
+                     value_header = self.LABEL
+
+                 characteristic_category_identifier = self.getIdentifier(self.CHARACTERISTIC_CATEGORY, value_header)
+                 if characteristic_category_identifier:
+                     continue
+
+                 characteristic_category_identifier = self.generateIdentifier(self.CHARACTERISTIC_CATEGORY, value_header)
+
+                 json_item = dict([])
+                 if value_header.startswith("http"):
+                    #the header has an ontology annotation TODO - get a test dataset
+                    pass
+                 else:
+                    json_item = dict([
+                        ("@id", characteristic_category_identifier),
+                        ("characteristicType", self.createOntologyAnnotation(value_header, "", ""))
+                    ])
+
+                 json_list.append(json_item)
+        return json_list
+
+
+    def createUnitsCategories(self, nodes):
+        json_list = []
+        for node_index in nodes:
+            node = nodes[node_index]
+            for header in node.metadata:
+                 if not header.startswith(self.CHARACTERISTICS) and not header.startswith(self.FACTOR_VALUE) and not header.startswith(self.PARAMETER_VALUE):
+                    continue
+                 value_attributes = node.metadata[header][0]
+                 try:
+                    unit = value_attributes.Unit
+                 except AttributeError:
+                     continue
+
+                 unit_category_identifier = self.getIdentifier(self.UNIT, unit)
+                 if unit_category_identifier:
+                    continue
+
+                 unit_category_identifier = self.generateIdentifier(self.UNIT, value_attributes.Unit)
+                 json_item = dict([
+                         ("@id", unit_category_identifier),
+                     ])
+                 json_item.update(self.createOntologyAnnotation(value_attributes.Unit, value_attributes.Term_Source_REF, value_attributes.Term_Accession_Number))
+                 json_list.append(json_item)
+        return json_list
+
+
+    def convert_num(self, s):
+        try:
+            return int(s)
+        except ValueError:
+            try:
+               return float(s)
+            except ValueError:
+                return s
+
+
+
+    def createValueList(self, column_name, node_name, node):
+        """Method for the creation of factor, characteristics and parameter values"""
+        json_list = []
+        for header in node.metadata:
+            if header.startswith(column_name) or header == self.MATERIAL_TYPE or header == self.LABEL or header==self.ARRAY_DESIGN_REF:
+                 value_header = header.replace("]", "").split("[")[-1]
+
+                 value_attributes = node.metadata[header][0]
+                 value  = self.convert_num(value_attributes[0])
+                 header_type = None
+
+                 if column_name.strip()==self.CHARACTERISTICS:
+                     if header not in node.attributes:
+                         continue
+                     if header == self.MATERIAL_TYPE:
+                        value_header = self.MATERIAL_TYPE
+                     elif header == self.LABEL:
+                        value_header = self.LABEL
+                     header_type = self.CHARACTERISTIC_CATEGORY
+                 elif column_name.strip()==self.FACTOR_VALUE:
+                     if header not in node.attributes:
+                         continue
+                     header_type = "factor"
+                 elif column_name.strip()==self.PARAMETER_VALUE:
+                     if header not in node.parameters:
+                         continue
+                     if header == self.ARRAY_DESIGN_REF:
+                         value_header = self.ARRAY_DESIGN_REF
+                     header_type = "parameter"
+
+                 category_identifier =  self.getIdentifier(header_type, value_header)
+
+                 if value_header==None or category_identifier==None:
+                    try:
+                        unit_identifier = self.getIdentifier(self.UNIT, value_attributes.Unit)
+                        value_json = dict([
+                         ("value", value),
+                         ("unit", dict([("@id", unit_identifier)]))
+                        ])
+                        json_list.append(value_json)
+                        continue
+                    except AttributeError:
+                        try:
+                            value_json = dict([
+                                ("value", self.createOntologyAnnotation(value, value_attributes.Term_Source_REF, value_attributes.Term_Accession_Number))
+                                ])
+                            json_list.append(value_json)
+                            continue
+                        except AttributeError:
+                            value_json = dict([
+                                 ("value", value)
+                                 ])
+                            json_list.append(value_json)
+
+                 else:
+                    try:
+                        unit_identifier = self.getIdentifier(self.UNIT, value_attributes.Unit)
+                        value_json = dict([
+                         ("category", dict([("@id", category_identifier)])),
+                         ("value", value),
+                         ("unit", dict([("@id", unit_identifier)]))
+                        ])
+                        json_list.append(value_json)
+                        continue
+                    except AttributeError:
+                        try:
+                            value_json = dict([
+                                ("category", dict([("@id", category_identifier)])),
+                                ("value", self.createOntologyAnnotation(value, value_attributes.Term_Source_REF, value_attributes.Term_Accession_Number))
+                                ])
+                            json_list.append(value_json)
+                            continue
+                        except AttributeError:
+                            value_json = dict([
+                                 ("category", dict([("@id", category_identifier)])),
+                                 ("value", value)
+                                 ])
+                            json_list.append(value_json)
+        return json_list
