@@ -42,6 +42,10 @@ class ISAtab2jsonTest(TestCase):
         isatab2json.convert(os.path.join(self._dir, './data/TEST-ISA-source-split/'), self._dir, isatab2json.IdentifierType.name)
         #isa_json = json.load(open(os.path.join(self._dir, 'TEST-ISA-repeated-measure.json')))
 
+    def test_isa_source_split_conversion(self):
+        isatab2json.convert(os.path.join(self._dir, './data/TEST-ISA-source-split-no-protocolref/'), self._dir,
+                            isatab2json.IdentifierType.name)
+        #isa_json = json.load(open(os.path.join(self._dir, 'TEST-ISA-source-split-no-protocolref.json')))
 
     def test_isa_source_split_with_error_conversion(self):
         isatab2json.convert(os.path.join(self._dir, './data/TEST-ISA-source-split-with-error/'), self._dir, isatab2json.IdentifierType.name)
@@ -51,7 +55,7 @@ class ISAtab2jsonTest(TestCase):
     def test_bii_s_3_conversion(self):
         self.sample_data_dir = os.path.join(self._dir, "../isatools/sampledata/")
         test_data_dir = os.path.join(self._dir, "./data/BII-S-3")
-        #isatab2json.convert(test_data_dir, self.sample_data_dir, isatab2json.IdentifierType.name)
+        isatab2json.convert(test_data_dir, self.sample_data_dir, isatab2json.IdentifierType.name)
 
     def test_bii_s_7_conversion(self):
         self.sample_data_dir = os.path.join(self._dir, "../isatools/sampledata/")

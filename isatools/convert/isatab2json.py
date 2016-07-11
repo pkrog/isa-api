@@ -699,13 +699,10 @@ class ISATab2ISAjson_v1:
         for header in node.metadata:
             if header.startswith(column_name) or header == self.MATERIAL_TYPE or header == self.LABEL or header==self.ARRAY_DESIGN_REF:
                  value_header = header.replace("]", "").split("[")[-1]
-
                  value_attributes = node.metadata[header][0]
                  value  = self.convert_num(value_attributes[0])
-
                  if not value:
                      continue
-
                  header_type = None
 
                  if (column_name.strip()==self.CHARACTERISTICS and (header.startswith(self.CHARACTERISTICS) or header == self.LABEL or header==self.MATERIAL_TYPE)):
@@ -728,9 +725,7 @@ class ISATab2ISAjson_v1:
                      header_type = "parameter"
 
                  if header_type:
-
                     category_identifier =  self.getIdentifier(header_type, value_header)
-
                     if value_header==None or category_identifier==None:
                         try:
                             unit_identifier = self.getIdentifier(self.UNIT, value_attributes.Unit)
@@ -752,7 +747,6 @@ class ISATab2ISAjson_v1:
                                      ("value", value)
                                      ])
                                 json_list.append(value_json)
-
                     else:
                         try:
                             unit_identifier = self.getIdentifier(self.UNIT, value_attributes.Unit)
@@ -762,7 +756,6 @@ class ISATab2ISAjson_v1:
                              ("unit", dict([("@id", unit_identifier)]))
                             ])
                             json_list.append(value_json)
-                            continue
                         except AttributeError:
                             try:
                                 value_json = dict([
@@ -770,7 +763,6 @@ class ISATab2ISAjson_v1:
                                     ("value", self.createOntologyAnnotation(value, value_attributes.Term_Source_REF, value_attributes.Term_Accession_Number))
                                     ])
                                 json_list.append(value_json)
-                                continue
                             except AttributeError:
                                 value_json = dict([
                                      ("category", dict([("@id", category_identifier)])),
