@@ -12,7 +12,7 @@ Firstly, we need to import the ISA API's model classes from the ``isatools`` PyP
 
 .. code-block:: python
 
-    from isatools.model.v1 import *
+    from isatools.model import *
 
 Next, we build our descriptor encapsulated in a single Python function to simplify the example code. In a real
 application or script, you might decompose the functionality and hook it up to interactive components to solicit
@@ -26,6 +26,7 @@ feedback from a user on-the-fly.
         # Create an empty Investigation object and set some values to the instance variables.
 
         investigation = Investigation()
+        investigation.identifier = "i1"
         investigation.title = "My Simple ISA Investigation"
         investigation.description = "We could alternatively use the class constructor's parameters to set some default " \
                                     "values at the time of creation, however we want to demonstrate how to use the " \
@@ -38,6 +39,7 @@ feedback from a user on-the-fly.
         # to the 'investigation' object's list of studies.
 
         study = Study(filename="s_study.txt")
+        study.identifier = "s1"
         study.title = "My ISA Study"
         study.description = "Like with the Investigation, we could use the class constructor to set some default values, " \
                             "but have chosen to demonstrate in this example the use of instance variables to set initial " \
@@ -65,7 +67,7 @@ feedback from a user on-the-fly.
         # Other instance variables common to both Investigation and Study objects include 'contacts' and 'publications',
         # each with lists of corresponding Person and Publication objects.
 
-        contact = Person(first_name="Alice", last_name="Robertson", affiliation="University of Life")
+        contact = Person(first_name="Alice", last_name="Robertson", affiliation="University of Life", roles=[OntologyAnnotation(term='submitter')])
         study.contacts.append(contact)
         publication = Publication(title="Experiments with Elephants", author_list="A. Robertson, B. Robertson")
         publication.pubmed_id = "12345678"
@@ -83,12 +85,18 @@ feedback from a user on-the-fly.
         source = Source(name='source_material')
         study.materials['sources'].append(source)
 
-        # Then we create three Sample objects and attach them to the study. We use the utility function
+        # Then we create three Sample objects, with organism as Homo Sapiens, and attach them to the study. We use the utility function
         # batch_create_material() to clone a prototype material object. The function automatiaclly appends
         # an index to the material name. In this case, three samples will be created, with the names
         # 'sample_material-0', 'sample_material-1' and 'sample_material-2'.
 
         prototype_sample = Sample(name='sample_material', derives_from=source)
+        ncbitaxon = OntologySource(name='NCBITaxon', description="NCBI Taxonomy")
+        characteristic_organism = Characteristic(category=OntologyAnnotation(term="Organism"),
+                                         value=OntologyAnnotation(term="Homo Sapiens", term_source=ncbitaxon,
+                                                                  term_accession="http://purl.bioontology.org/ontology/NCBITAXON/9606"))
+        prototype_sample.characteristics.append(characteristic_organism)
+
         study.materials['samples'] = batch_create_materials(prototype_sample, n=3)  # creates a batch of 3 samples
 
         # Now we create a single Protocol object that represents our sample collection protocol, and attach it to the
@@ -157,13 +165,13 @@ feedback from a user on-the-fly.
 
             # Sequencing process usually has an output data file
 
-            datafile = DataFile(filename="sequenced-data-{}".format(i))
+            datafile = DataFile(filename="sequenced-data-{}".format(i), label="Raw Data File")
             sequencing_process.outputs.append(datafile)
 
-            # ensure Processes are linked forward and backward
+            # Ensure Processes are linked forward and backward. plink(from_process, to_process) is a function to set
+            # these links for you. It is found in the isatools.model package
 
-            extraction_process.next_process = sequencing_process
-            sequencing_process.prev_process = extraction_process
+            plink(extraction_process, sequencing_process)
 
             # make sure the extract, data file, and the processes are attached to the assay
 
@@ -171,28 +179,48 @@ feedback from a user on-the-fly.
             assay.materials['other_material'].append(material)
             assay.process_sequence.append(extraction_process)
             assay.process_sequence.append(sequencing_process)
+            assay.measurement_type = OntologyAnnotation(term="gene sequencing")
+            assay.technology_type = OntologyAnnotation(term="nucleotide sequencing")
 
         # attach the assay to the study
 
         study.assays.append(assay)
+
+To write out the ISA-Tab, you can use the ``isatab.dumps()`` function:
+
+.. code-block:: python
 
         from isatools.isatab import dumps
         return dumps(investigation)  # dumps() writes out the ISA as a string representation of the ISA-Tab
 
 The function listed above is designed to return all three files as a single string output for ease of inspection.
 Alternatively you could do something like ``dump(isa_obj=investigation, output_path='./')`` to write the files to
-the file system. The final lines of code is a ``main`` routine to invoke the ``create_descriptor()`` function.
+the file system.
+
+Alternatively to write out the ISA JSON, you can use the ``ISAJSONEncoder`` class with the Python ``json`` package:
+
+.. code-block:: python
+
+        import json
+        from isatools.isajson import ISAJSONEncoder
+        # Note that the extra parameters sort_keys, indent and separators are to make the output more human-readable.
+        return json.dumps(investigation, cls=ISAJSONEncoder, sort_keys=True, indent=4, separators=(',', ': '))
+
+
+The final lines of code is a ``main`` routine to invoke the ``create_descriptor()`` function.
 
 .. code-block:: python
 
     if __name__ == '__main__':
         print(create_descriptor())
 
-To execute this script on the command line and view the output, you would run it with::
+If you save the file into something like ``createSimpleISA.py``, to execute this script on the command line and view
+the output, you would run it with::
 
     python createSimpleISA.py
 
 
 This example can be found in the ``isatools.examples`` package in
-`createSimpleISAtab.py <https://github.com/ISA-tools/isa-api/blob/master/isatools/examples/createSimpleISAtab.py>`_.
+`createSimpleISAtab.py <https://github.com/ISA-tools/isa-api/blob/master/isatools/examples/createSimpleISAtab.py>`_ and
+`createSimpleISAJSON.py <https://github.com/ISA-tools/isa-api/blob/master/isatools/examples/createSimpleISAJSON.py>`_
 

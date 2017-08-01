@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from isatools.model.v1 import *
+from isatools.model import *
 
 
 def create_descriptor():
@@ -68,12 +68,18 @@ def create_descriptor():
     source = Source(name='source_material')
     study.materials['sources'].append(source)
 
-    # Then we create three Sample objects and attach them to the study. We use the utility function
+    # Then we create three Sample objects, with organism as Homo Sapiens, and attach them to the study. We use the utility function
     # batch_create_material() to clone a prototype material object. The function automatiaclly appends
     # an index to the material name. In this case, three samples will be created, with the names
     # 'sample_material-0', 'sample_material-1' and 'sample_material-2'.
 
-    prototype_sample = Sample(name='sample_material', derives_from=source)
+    prototype_sample = Sample(name='sample_material', derives_from=[source])
+    ncbitaxon = OntologySource(name='NCBITaxon', description="NCBI Taxonomy")
+    characteristic_organism = Characteristic(category=OntologyAnnotation(term="Organism"),
+                                     value=OntologyAnnotation(term="Homo Sapiens", term_source=ncbitaxon,
+                                                              term_accession="http://purl.bioontology.org/ontology/NCBITAXON/9606"))
+    prototype_sample.characteristics.append(characteristic_organism)
+
     study.materials['samples'] = batch_create_materials(prototype_sample, n=3)  # creates a batch of 3 samples
 
     # Now we create a single Protocol object that represents our sample collection protocol, and attach it to the
@@ -142,13 +148,12 @@ def create_descriptor():
 
         # Sequencing process usually has an output data file
 
-        datafile = DataFile(filename="sequenced-data-{}".format(i), label="Raw Data File")
+        datafile = DataFile(filename="sequenced-data-{}".format(i), label="Raw Data File", generated_from=[sample])
         sequencing_process.outputs.append(datafile)
 
         # ensure Processes are linked forward and backward
 
-        extraction_process.next_process = sequencing_process
-        sequencing_process.prev_process = extraction_process
+        plink(extraction_process, sequencing_process)
 
         # make sure the extract, data file, and the processes are attached to the assay
 

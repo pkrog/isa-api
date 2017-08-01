@@ -6,6 +6,14 @@ from isatools.io import isatab_configurator as configurator
 from tests import utils
 
 
+def setUpModule():
+    if not os.path.exists(utils.DATA_DIR):
+        raise FileNotFoundError("Could not fine test data directory in {0}. Ensure you have cloned the ISAdatasets "
+                                "repository using "
+                                "git clone -b tests --single-branch git@github.com:ISA-tools/ISAdatasets {0}"
+                                .format(utils.DATA_DIR))
+
+
 class TestIsaTabConfigurator(unittest.TestCase):
 
     @classmethod

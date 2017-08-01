@@ -1,32 +1,37 @@
-# coding: utf-8
 import pandas as pd
 from pandas.util.testing import assert_frame_equal
 from isatools.isatab import read_investigation_file
 import os
-
-import six
-import sys
 import re
+import logging
+from isatools import config
 
-_data_dir = os.path.join(os.path.dirname(__file__), 'data')
+logging.basicConfig(level=config.log_level)
+log = logging.getLogger(__name__)
 
-SAMPLE_DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'isatools', 'sampledata')
 
-JSON_DATA_DIR = os.path.join(_data_dir, 'json')
+DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
+
+JSON_DATA_DIR = os.path.join(DATA_DIR, 'json')
 UNIT_JSON_DATA_DIR = os.path.join(JSON_DATA_DIR, 'unit')
 
-SRA_DATA_DIR = os.path.join(_data_dir, 'sra')
+SRA_DATA_DIR = os.path.join(DATA_DIR, 'sra')
 
-TAB_DATA_DIR = os.path.join(_data_dir, 'tab')
+TAB_DATA_DIR = os.path.join(DATA_DIR, 'tab')
 
-MZML_DATA_DIR = os.path.join(_data_dir, 'mzml')
+MAGETAB_DATA_DIR = os.path.join(DATA_DIR, 'magetab')
 
-CONFIGS_DATA_DIR = os.path.join(_data_dir, 'configs')
+MZML_DATA_DIR = os.path.join(DATA_DIR, 'mzml')
+
+SAMPLETAB_DATA_DIR = os.path.join(DATA_DIR, 'sampletab')
+
+CONFIGS_DATA_DIR = os.path.join(DATA_DIR, 'configs')
 XML_CONFIGS_DATA_DIR = os.path.join(CONFIGS_DATA_DIR, 'xml')
 DEFAULT2015_XML_CONFIGS_DATA_DIR = os.path.join(XML_CONFIGS_DATA_DIR, 'isaconfig-default_v2015-07-02')
 SRA2016_XML_CONFIGS_DATA_DIR = os.path.join(XML_CONFIGS_DATA_DIR, 'isaconfig-seq_v2016-08-30-SRA1.5-august2014mod')
-JSON_DEFAULT_CONFIGS_DATA_DIR = os.path.join(CONFIGS_DATA_DIR, 'json_default')
-JSON_SRA_CONFIGS_DATA_DIR = os.path.join(CONFIGS_DATA_DIR, 'json_sra')
+JSON_DEFAULT_CONFIGS_DATA_DIR = os.path.join(DATA_DIR, CONFIGS_DATA_DIR, 'json_default')
+JSON_SRA_CONFIGS_DATA_DIR = os.path.join(DATA_DIR, CONFIGS_DATA_DIR, 'json_sra')
+
 
 _RX_CHARACTERISTICS = re.compile('Characteristics\[(.*?)\]')
 _RX_PARAM_VALUE = re.compile('Parameter Value\[(.*?)\]')
@@ -50,7 +55,7 @@ def assert_tab_content_equal(fp_x, fp_y):
             assert_frame_equal(x.sort_values(by=x.columns[0]), y.sort_values(by=y.columns[0]))
             return True
         except AssertionError as e:
-            print(e)
+            log.error(e)
             return False
 
     from os.path import basename
@@ -58,7 +63,7 @@ def assert_tab_content_equal(fp_x, fp_y):
         df_dict_x = read_investigation_file(fp_x)
         df_dict_y = read_investigation_file(fp_y)
         eq = True
-        for k in six.iterkeys(df_dict_x):
+        for k in df_dict_x.keys():
             dfx = df_dict_x[k]
             dfy = df_dict_y[k]
             if not isinstance(dfx, list):
@@ -72,7 +77,7 @@ def assert_tab_content_equal(fp_x, fp_y):
                             eq = False
                             break
                 except ValueError as e:
-                    print(e)
+                    log.error(e)
         return eq
     else:
 
@@ -92,11 +97,11 @@ def assert_tab_content_equal(fp_x, fp_y):
             df_y = df_y.dropna(axis=1, how='all')
             df_y = df_y.replace(np.nan, '')
 
-            is_cols_equal = {x.split('.', 1)[0] for x in df_x.columns} == {x.split('.', 1)[0] for x in df_y.columns}
+            is_cols_equal = set([x.split('.', 1)[0] for x in df_x.columns]) == set([x.split('.', 1)[0] for x in df_y.columns])
             if not is_cols_equal:
-                print('x: ' + str(df_x.columns))
-                print('y: ' + str(df_y.columns))
-                print(diff(df_x.columns, df_y.columns))
+                log.debug('x: ' + str(df_x.columns))
+                log.debug('y: ' + str(df_y.columns))
+                log.debug(diff(df_x.columns, df_y.columns))
                 raise AssertionError("Columns in x do not match those in y")
 
             # reindex to add contexts for duplicate named columns (i.e. Term Accession Number, Unit, etc.)
@@ -142,19 +147,18 @@ def assert_tab_content_equal(fp_x, fp_y):
             for colx in df_x.columns:
                 for eachx, eachy in zip(df_x.sort_values(by=colx)[colx], df_y.sort_values(by=colx)[colx]):
                     if eachx != eachy:
-                        print(df_x[colx])
-                        print(df_y[colx])
+                        log.debug(df_x[colx])
+                        log.debug(df_y[colx])
                         raise AssertionError("Value: " + str(eachx) + ", does not match: " + str(eachy))
-            # print("Well, you got here so the files must be same-ish... well done, you!")
             return True
         except AssertionError as e:
-            print(str(e))
+            log.error(str(e))
             return False
 
 
 def sortlistsj(J):
     if isinstance(J, dict):
-        for k in six.iterkeys(J):
+        for k in J.keys():
             sortlistsj(J[k])
     elif isinstance(J, list):
         for o in J:
@@ -178,7 +182,7 @@ def assert_json_equal(jx, jy):
         return True
     else:
         from deepdiff import DeepDiff
-        print('DeepDiff={}'.format(DeepDiff(jx, jy)))
+        log.debug('DeepDiff={}'.format(DeepDiff(jx, jy)))
         return False
 
 
@@ -194,20 +198,20 @@ def assert_xml_equal(x1, x2):
     x1tags = collect_tags(x1)
     x2tags = collect_tags(x2)
     if len(x1tags - x2tags) > 0 or len(x2tags - x1tags) > 0:
-        print("Collected tags don't match: ", x1tags, x2tags)
+        log.debug("Collected tags don't match: ", x1tags, x2tags)
         return False
     else:
         for tag in x1tags:
             tagcount1 = x1.xpath('count(//{})'.format(tag))
             tagcount2 = x2.xpath('count(//{})'.format(tag))
             if tagcount1 != tagcount2:
-                print("Counts of {0} tag do not match {1}:{2}".format(tag, int(tagcount1), int(tagcount2)))
+                log.debug("Counts of {0} tag do not match {1}:{2}".format(tag, int(tagcount1), int(tagcount2)))
                 return False
         return True
 
 
 def strip_ids(J):
-    for k, v in six.iteritems(J):
+    for k, v in J.items():
         if isinstance(v, dict):
             strip_ids(v)
         elif isinstance(v, list):

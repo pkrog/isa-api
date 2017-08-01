@@ -46,3 +46,37 @@ if you want to upgrade the requirements already installed.
 Now you're ready to get started!
 
 For full instructions on installing and using ``virtualenv`` see `their documentation <https://virtualenv.readthedocs.org>`_.
+
+Running tests
+-------------
+
+The tests in the ISA-API rely on datasets available in the test branch of the `ISAdatasets repository <http://github.com/ISA-tools/ISAdatasets>`_.
+
+Thus, the first step for running the tests is to clone that branch under the /tests/data folder:
+
+``git clone -b tests --single-branch http://github.com/ISA-tools/ISAdatasets tests/data``
+
+After that, you can run the test with the usual command:
+
+``python setup.py test``
+
+Logging
+-------
+
+By default the ISA-API will output error messages to the standard output. To control the logging level, you can set
+the logging level via the `isatools` package as follows:
+
+```
+import isatools
+import logging
+isatools.log_level = logging.INFO  # sets log level to INFO
+
+from isatools import isatab
+"""
+Now do some stuff with the isatab package - logging should output messages at INFO, WARNING, ERROR and FATAL levels
+"""
+ISA = isatab.load(...)
+
+```
+Note that you cannot reset the log level interactively after setting it the first time, so you would need to reload
+your environment (iPython etc.) to change the log level again.

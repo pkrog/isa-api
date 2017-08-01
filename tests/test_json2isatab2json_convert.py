@@ -1,27 +1,24 @@
-# coding: utf-8
 import os
 import unittest
+from isatools.convert import isatab2json, json2isatab
 import shutil
 import json
-import tempfile
-import functools
-import contextlib
-import six
-
-from isatools.convert import isatab2json, json2isatab
 from tests import utils
+import tempfile
 
-# This will remove the "'U' flag is deprecated" DeprecationWarning in Python3
-open = functools.partial(open, mode='r') if six.PY3 else functools.partial(open, mode='rbU')
+
+def setUpModule():
+    if not os.path.exists(utils.DATA_DIR):
+        raise FileNotFoundError("Could not fine test data directory in {0}. Ensure you have cloned the ISAdatasets "
+                                "repository using "
+                                "git clone -b tests --single-branch git@github.com:ISA-tools/ISAdatasets {0}"
+                                .format(utils.DATA_DIR))
 
 
 class TestJsonIsaTabTwoWayConvert(unittest.TestCase):
 
-    @classmethod
-    def setUpClass(cls):
-        cls._json_data_dir = utils.JSON_DATA_DIR
-
     def setUp(self):
+        self._json_data_dir = utils.JSON_DATA_DIR
         self._tmp_dir = tempfile.mkdtemp()
 
     def tearDown(self):
@@ -44,7 +41,6 @@ class TestJsonIsaTabTwoWayConvert(unittest.TestCase):
             expected_json = json.load(test_json)
             actual_json = isatab2json.convert(self._tmp_dir, validate_first=False)
             self.assertTrue(utils.assert_json_equal(expected_json, actual_json))
-
 
     # def test_json2isatab_isatab2json_2way_convert_bii_i_1(self):
     #     #  FIXME: Get error in isatab2json.createUnitsCategories

@@ -2,9 +2,7 @@
 
 # Inspired by validateSBML.py example from libSBML Python API
 
-from __future__ import unicode_literals, print_function
-
-from isatools.isatab import validate2
+from isatools.isatab import validate
 import sys
 import os
 
@@ -31,10 +29,7 @@ def main(args):
             numfiles += 1
         else:
             with open(args[i]) as fp:
-                report = validate2(fp)
-                with open('/tmp/failing.txt', 'w') as f:
-                    import json
-                    json.dump(report, f, indent=4)
+                report = validate(fp)
                 numerrors = len(report['errors'])
                 numwarnings = len(report['warnings'])
                 if numerrors > 0:

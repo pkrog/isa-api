@@ -1,14 +1,11 @@
-from __future__ import absolute_import
-
-from mzml2isa.parsing import convert as mzml_convert
-
-
-from isatools import isatab
-
 import logging
 import os
+from mzml2isa.parsing import convert as mzml_convert
 
-logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s', level=logging.INFO)
+from isatools import config
+from isatools import isatab
+
+logging.basicConfig(level=config.log_level)
 logger = logging.getLogger(__name__)
 
 
@@ -23,5 +20,5 @@ def convert(mzml_folder, out_folder, study_id, validate_output=False):
         raise FileNotFoundError("Could not find input mzml folder")
     mzml_convert(mzml_folder, out_folder, study_id)
     if validate_output and os.path.exists(out_folder):
-        with open(os.path.join(out_folder, study_id, 'i_Investigation.txt')) as i_fp:
-            return isatab.validate2(i_fp)
+        with open(os.path.join(out_folder, study_id, 'i_Investigation.txt'), 'r', encoding='utf-8') as i_fp:
+            return isatab.validate(i_fp)
