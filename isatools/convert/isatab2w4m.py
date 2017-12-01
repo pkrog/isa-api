@@ -316,7 +316,7 @@ def get_investigation_file(input_dir):
 
     # No file
     if len(investigation_files) == 0:
-        error('No investigation file found.')
+        error('No investigation file found in {}.'.format(input_dir))
 
     # More than one file
     if len(investigation_files) > 1:
